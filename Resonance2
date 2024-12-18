@@ -1,0 +1,199 @@
+import win32com.client
+from tkinter import StringVar
+import ttkbootstrap as ttk
+from tkinter import messagebox
+import serial.tools.list_ports
+import requests
+
+
+# Функция для получения списка COM-портов
+def get_com_ports():
+    ports = serial.tools.list_ports.comports()
+    sorted_ports = sorted(ports, key=lambda p: p.device)  # Сортировка по имени устройства
+    return [port.device for port in sorted_ports]
+
+
+# Глобальные переменные
+stop_test = False
+cut_count = 0
+
+# Глобальная переменная для объекта подключения
+rro_manager = None
+##############################################################################################
+# Директорія проекту не повинна містити кирилицю
+def connect_to_rro(port, label_status):
+    global rro_manager
+    try:
+        # Создание COM-объекта
+        rro_manager = win32com.client.Dispatch("M304Manager.Application")
+
+        # Попытка подключения через порт
+        try:
+            rro_manager.Init(port)  # Передача строки, например, "COM3"
+        except Exception as e_str:
+            # Если строка не сработала, пробуем передать номер порта
+            port_number = int(''.join(filter(str.isdigit, port)))
+            rro_manager.Init(port_number)
+
+        # Получение серийного номера
+        serial_number = rro_manager.GetPrinterSerialNumber
+        label_status.config(text=f"Підключено. S/N: {serial_number}", style="success.TLabel")
+    except Exception as e:
+        pass
+        #label_status.config(text=f"Помилка підключення: {e}", style="danger.TLabel")
+
+# Отключение от РРО
+def disconnect_from_rro(label_status):
+    global rro_manager
+    if rro_manager:
+        try:
+            rro_manager.Close()
+            rro_manager = None
+            label_status.config(text="З'єднання закрито", style="info.TLabel")
+        except Exception as e:
+            label_status.config(text=f"Помилка відключення: {e}", style="danger.TLabel")
+    else:
+        label_status.config(text="З'єднання не активне", style="warning.TLabel")
+
+###################################################################################
+def get_response():
+    try:
+        response = rro_manager.LastResponse
+        
+        return response
+    except AttributeError:
+        #print("Ошибка получения ответа от кассы")
+        return -1  # Или другое значение для обозначения ошибки
+###################################################################################
+# Выполнение X-отчёта
+def execute_x_report(label_status):
+    global rro_manager
+    if not rro_manager:
+        label_status.config(text="РРО не підключено", style="danger.TLabel")
+        return
+
+    try:
+        rro_manager.XReport()
+        # Получаем ответ кассы (при необходимости)
+        response = get_response()
+        if response == 1:
+            label_status.config(text="X-звіт виконано", style="success.TLabel")
+        else:
+            label_status.config(text="Помилка виконання X-звіту", style="danger.TLabel")
+    except Exception as e:
+        pass
+        #print("Помилка виконання X-звіту")
+        # Обработка исключения, например, получение кода ошибки
+        # error_code = get_error_code(e)
+        # label_status.config(text=f"Помилка виконання X-звіту: {error_code}", style="danger.TLabel")
+
+
+# Тест печати нулевых чеков
+def test_cutting(label_status, label_count):
+    global rro_manager, stop_test, cut_count
+
+    if not rro_manager:
+        label_status.config(text="РРО не підключено", style="danger.TLabel")
+        return
+
+    stop_test = False
+    cut_count = 0
+
+    def worker():
+        global cut_count, stop_test
+
+        if stop_test:
+            label_status.config(text="Тест друку зупинено", style="info.TLabel")
+            return
+
+        try:
+            rro_manager.NullCheck()
+            response = get_response()  # Вызов функции для получения ответа кассы
+
+            if response == 1:
+                cut_count += 1
+                label_count.config(text=f"Надруковано чеків: {cut_count}")
+            else:
+                label_status.config(text="Помилка при друці чека", style="danger.TLabel")
+                stop_test = True  # Прекращаем тест при ошибке
+        except Exception as e:
+            pass
+            #print("Помилка друку")
+            # label_status.config(text=f"Помилка: {e}", style="danger.TLabel")
+            # stop_test = True
+
+        if not stop_test:
+            app.after(2000, worker)
+
+    app.after(0, worker)
+
+# Остановка теста печати
+def stop_cutting(label_status):
+    global stop_test
+    stop_test = True
+    label_status.config(text="Тест друку зупинено", style="info.TLabel")
+    print("Тест друку зупинено.")
+
+
+# Создание интерфейса
+def create_gui():
+    global app
+    app = ttk.Window(themename="superhero")
+    app.title("Тест автообрізки Марія-304Т3")
+    app.geometry("400x350")
+    app.resizable(False, False)
+
+    # Создание меню
+    menu_bar = ttk.Menu(app)
+    # Подменю для информации о программе
+    about_menu = ttk.Menu(menu_bar, tearoff=0)
+    menu_bar.add_cascade(label="Про програму", menu=about_menu)
+    about_menu.add_command(label="Автор: @FiRmado")
+    about_menu.add_command(label="Дата релізу: 12.12.2024")
+
+    # Устанавливаем меню
+    app.config(menu=menu_bar)
+
+    # Выпадающий список COM-портов
+    ports = get_com_ports()
+    com_port = StringVar(value=ports[0] if ports else "")
+    ttk.Label(app, text="Виберіть COM-порт:").pack(pady=10)
+    port_menu = ttk.Combobox(app, values=ports, width=24, textvariable=com_port)
+    port_menu.pack()
+
+    # Статус подключения
+    label_status = ttk.Label(app, text="Не підключено", style="warning.TLabel")
+    label_status.pack(pady=10)
+
+    # Кнопка подключения
+    ttk.Button(
+        app, text="Підключитися", width=25, style="primary",
+        command=lambda: connect_to_rro(com_port.get(), label_status)
+    ).pack(pady=5)
+
+    # Кнопка X-отчёта
+    ttk.Button(
+        app, text="X-звіт", width=25, style="success",
+        command=lambda: execute_x_report(label_status)
+    ).pack(pady=5)
+
+    # Счётчик чеков
+    label_count = ttk.Label(app, text="Надруковано чеків: 0")
+    label_count.pack(pady=10)
+
+    # Кнопка теста печати
+    ttk.Button(
+        app, text="Тест друку", width=25, style="primary",
+        command=lambda: test_cutting(label_status, label_count)
+    ).pack(pady=5)
+
+    # Кнопка остановки теста
+    ttk.Button(
+        app, text="Зупинити тест", width=25, style="danger",
+        command=lambda: stop_cutting(label_status)
+    ).pack(pady=5)
+
+    app.mainloop()
+
+if __name__ == "__main__":
+    create_gui()
