@@ -1,9 +1,8 @@
 import win32com.client
 from tkinter import StringVar
 import ttkbootstrap as ttk
-from tkinter import messagebox
 import serial.tools.list_ports
-import requests
+import ctypes
 
 
 # Функция для получения списка COM-портов
@@ -19,7 +18,8 @@ cut_count = 0
 
 # Глобальная переменная для объекта подключения
 rro_manager = None
-##############################################################################################
+
+
 # Директорія проекту не повинна містити кирилицю
 def connect_to_rro(port, label_status):
     global rro_manager
@@ -40,7 +40,7 @@ def connect_to_rro(port, label_status):
         label_status.config(text=f"Підключено. S/N: {serial_number}", style="success.TLabel")
     except Exception as e:
         pass
-        #label_status.config(text=f"Помилка підключення: {e}", style="danger.TLabel")
+
 
 # Отключение от РРО
 def disconnect_from_rro(label_status):
@@ -55,16 +55,16 @@ def disconnect_from_rro(label_status):
     else:
         label_status.config(text="З'єднання не активне", style="warning.TLabel")
 
-###################################################################################
+
 def get_response():
     try:
         response = rro_manager.LastResponse
         
         return response
     except AttributeError:
-        #print("Ошибка получения ответа от кассы")
         return -1  # Или другое значение для обозначения ошибки
-###################################################################################
+    
+
 # Выполнение X-отчёта
 def execute_x_report(label_status):
     global rro_manager
@@ -80,12 +80,9 @@ def execute_x_report(label_status):
             label_status.config(text="X-звіт виконано", style="success.TLabel")
         else:
             label_status.config(text="Помилка виконання X-звіту", style="danger.TLabel")
+
     except Exception as e:
         pass
-        #print("Помилка виконання X-звіту")
-        # Обработка исключения, например, получение кода ошибки
-        # error_code = get_error_code(e)
-        # label_status.config(text=f"Помилка виконання X-звіту: {error_code}", style="danger.TLabel")
 
 
 # Тест печати нулевых чеков
@@ -116,23 +113,35 @@ def test_cutting(label_status, label_count):
             else:
                 label_status.config(text="Помилка при друці чека", style="danger.TLabel")
                 stop_test = True  # Прекращаем тест при ошибке
+            
+            app.update()
+
         except Exception as e:
             pass
-            #print("Помилка друку")
-            # label_status.config(text=f"Помилка: {e}", style="danger.TLabel")
-            # stop_test = True
 
         if not stop_test:
             app.after(2000, worker)
-
+        
     app.after(0, worker)
+
 
 # Остановка теста печати
 def stop_cutting(label_status):
     global stop_test
     stop_test = True
     label_status.config(text="Тест друку зупинено", style="info.TLabel")
-    print("Тест друку зупинено.")
+
+
+def get_scaling_factor():
+    """
+    Получает коэффициент масштабирования экрана.
+    Например, 150% = 1.5, 100% = 1.0.
+    """
+    try:
+        user32 = ctypes.windll.user32
+        return user32.GetDpiForWindow(app.winfo_id()) / 96  # 96 DPI = 100%
+    except:
+        return 1.0  # Если не удалось определить, используем 100%
 
 
 # Создание интерфейса
@@ -140,7 +149,12 @@ def create_gui():
     global app
     app = ttk.Window(themename="superhero")
     app.title("Тест автообрізки Марія-304Т3")
-    app.geometry("400x350")
+
+    scaling_factor = get_scaling_factor()
+    width = int(400 * scaling_factor)
+    height = int(350 * scaling_factor)
+
+    app.geometry(f"{width}x{height}")
     app.resizable(False, False)
 
     # Создание меню
